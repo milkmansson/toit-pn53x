@@ -9,6 +9,7 @@ A driver for the PN532 and PN533 NFC reader.
 import uart
 import gpio
 import i2c
+import spi
 import nfc.card-type show CardType
 import nfc.reader show Reader ReaderCapabilities Target
 
@@ -146,16 +147,64 @@ class UartCommunication_ extends Communication_:
     frame-size := Communication_.HEADER-SIZE_ + frame-data-size + Communication_.FOOTER-SIZE_
     return port_.in.read-bytes frame-size
 
-/*
-class SpiCommunication_ extends Communication_:
-  wakeup:
-    // TODO(florian): Adafruit claims that they have to do a dummy command to get synced
-    // up in SPI mode.
-    // I'm assuming that's to wake the device up.
+/**
+SPI framing for the PN532 (application note AN133910, "PN532 SPI").
 
-    // Documentation (application note 153710) says:
-    // Set NSS low during 1 ms (can be less depending on the quartz)
+Unlike most SPI peripherals, the PN532 shifts data LSB-first on the wire.
+  Toit's `spi` library only configures clock polarity/phase (CPOL/CPHA),
+  not bit order, so every byte sent or received here is bit-reversed in
+  software to compensate ($reverse-bits_).
+
+Before any data exchange, the host must poll a status byte (the
+  STATREAD control byte) until the PN532 reports it's ready; this is how
+  the chip signals "I have a response for you" in SPI mode, replacing
+  the I2C transport's IRQ pin.
 */
+class SpiCommunication_ extends Communication_:
+  static STATUS-READ_ ::= 0x02
+  static DATA-WRITE_ ::= 0x01
+  static DATA-READ_ ::= 0x03
+  static READY_ ::= 0x01
+
+  device_/spi.Device
+
+  constructor .device_:
+
+  wakeup:
+    // Application note AN133910 says to hold NSS (chip select) low for
+    // about 1 ms to bring the chip out of deep sleep; a status read
+    // does exactly that as a side effect, so it doubles as the wakeup
+    // pulse.
+    catch: read-status_
+
+  write-frame frame/ByteArray -> none:
+    out := ByteArray frame.size + 1
+    out[0] = reverse-bits_ DATA-WRITE_
+    frame.size.repeat: out[it + 1] = reverse-bits_ frame[it]
+    device_.write out
+
+  read-frame_ max-size/int -> ByteArray:
+    with-timeout --ms=1000:
+      while not read-status_: sleep --ms=1
+
+    out := ByteArray max-size + 1
+    out[0] = reverse-bits_ DATA-READ_
+    device_.transfer out --read
+    result := ByteArray max-size
+    max-size.repeat: result[it] = reverse-bits_ out[it + 1]
+    return result
+
+  read-status_ -> bool:
+    out := #[reverse-bits_ STATUS-READ_, 0x00]
+    device_.transfer out --read
+    return (reverse-bits_ out[1]) == READY_
+
+  static reverse-bits_ byte/int -> int:
+    result := 0
+    8.repeat:
+      result = (result << 1) | (byte & 1)
+      byte >>= 1
+    return result
 
 /**
 A target found by $Initiator.list-passive-targets.
@@ -475,6 +524,14 @@ class Pn53x implements Reader:
 
   constructor.i2c device/i2c.Device --irq/gpio.Pin --reset/gpio.Pin?=null:
     communication_ = I2cCommunication_ device irq
+    reset-pin_ = reset
+
+  /**
+  $device should be created with --mode=0 (CPOL=0, CPHA=0), per
+    AN133910. See $SpiCommunication_ for the framing details.
+  */
+  constructor.spi device/spi.Device --reset/gpio.Pin?=null:
+    communication_ = SpiCommunication_ device
     reset-pin_ = reset
 
   on -> none:
