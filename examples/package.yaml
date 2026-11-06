@@ -1,1 +1,4 @@
-# Toit Package File.
+name: pn53x-examples
+dependencies:
+  pn53x:
+    path: ..

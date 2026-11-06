@@ -1,6 +1,6 @@
-// Copyright (C) 2022 Toitware ApS. All rights reserved.
-// Use of this source code is governed by a MIT-style license that can be found
-// in the LICENSE file.
+// Copyright (C) 2026 Toit contributors.
+// Use of this source code is governed by an MIT-style license that can be
+// found in the LICENSE file.
 
 /**
 A driver for the PN532 and PN533 NFC reader.
@@ -9,15 +9,15 @@ A driver for the PN532 and PN533 NFC reader.
 import uart
 import gpio
 import i2c
-import reader
-import writer
+import nfc.card-type show CardType
+import nfc.reader show Reader ReaderCapabilities Target
 
 abstract class Communication_:
-  static HEADER_SIZE_ ::= 5  // Preamble, start code * 2, length, length checksum.
-  static FOOTER_SIZE_ ::= 2  // Data checksum and postamble.
+  static HEADER-SIZE_ ::= 5  // Preamble, start code * 2, length, length checksum.
+  static FOOTER-SIZE_ ::= 2  // Data checksum and postamble.
 
-  abstract read_frame_ max_size/int -> ByteArray
-  abstract write_frame frame/ByteArray
+  abstract read-frame_ max-size/int -> ByteArray
+  abstract write-frame frame/ByteArray
 
   /**
   # Inheritance
@@ -27,20 +27,15 @@ abstract class Communication_:
   */
   abstract wakeup
 
-  frame_size_ data/ByteArray:
-    return data[3] + 6
-
   /**
   Reads data from the NFC reader.
 
-  The frame must not have more than $max_data_size data bytes.
+  The frame must not have more than $max-data-size data bytes.
   */
-  read --max_data_size/int -> ByteArray:
-    max_header_size := 5  // Preamble, start code * 2, length and length checksum.
-    max_footer_size := 2  // Data checksum and postamble.
-    frame := read_frame_ (HEADER_SIZE_ + max_data_size + FOOTER_SIZE_)
+  read --max-data-size/int -> ByteArray:
+    frame := read-frame_ (HEADER-SIZE_ + max-data-size + FOOTER-SIZE_)
 
-  // Remove header and footer from frame.
+    // Remove header and footer from frame.
     if frame[0] != 0x00 or frame[1] != 0x00 or frame[2] != 0xFF:
       throw "Invalid frame"
     size := frame[3]
@@ -66,11 +61,11 @@ abstract class Communication_:
     return result
 
   write data/ByteArray:
-    header_size := 5
-    footer_size := 2
-    frame_size := header_size + data.size + footer_size
+    header-size := 5
+    footer-size := 2
+    frame-size := header-size + data.size + footer-size
 
-    frame := ByteArray frame_size
+    frame := ByteArray frame-size
 
     index := 0
     frame[index++] = 0x00 // Preamble: 1 byte. Equal to 0x00
@@ -78,17 +73,17 @@ abstract class Communication_:
     frame[index++] = 0xFF
     frame[index++] = data.size // Length. 1 byte.
     frame[index++] = 0x100 - data.size // Length checksum. 1 byte.
-    assert: index == header_size
+    assert: index == header-size
     frame.replace index data
     index += data.size
 
-    data_checksum := 0
+    data-checksum := 0
     for i := 0; i < data.size; i++:
-      data_checksum = (data_checksum + data[i]) & 0xFF
-    frame[index++] = 0x100 - data_checksum // Data checksum. 1 byte.
+      data-checksum = (data-checksum + data[i]) & 0xFF
+    frame[index++] = 0x100 - data-checksum // Data checksum. 1 byte.
     frame[index++] = 0x00 // Postamble. 1 byte.
 
-    write_frame frame
+    write-frame frame
 
 class I2cCommunication_ extends Communication_:
   device_/i2c.Device
@@ -97,29 +92,27 @@ class I2cCommunication_ extends Communication_:
   constructor .device_ .irq_:
     irq_.configure --input
 
-  write_frame frame/ByteArray -> none:
+  write-frame frame/ByteArray -> none:
     device_.write frame
 
-  read_frame_ max_size/int -> ByteArray:
+  read-frame_ max-size/int -> ByteArray:
     // When reading, the PN532 prefixes the data with a status byte.
     // If it's 0x00, we have to ignore the byte and continue reading until the
     // byte is 0x01.
     // This means that the size of the data we need to read is not known beforehand.
     // Due to the i2c protocol we can't just read single bytes one by one. Instead,
     // we have to use the interrupt pin to know when we can start reading.
-    // print "waiting for irq to become 0 $irq_.get"
-    to_exception := catch: with_timeout --ms=15_000:
-      irq_.wait_for 0
-    if to_exception: print "*****************  to_exception: $to_exception $irq_.get"
-    // print "irq is 0"
+    to-exception := catch: with-timeout --ms=15_000:
+      irq_.wait-for 0
+    if to-exception: print "*****************  to_exception: $to-exception $irq_.get"
     data /ByteArray? := null
     for i := 0; i < 100; i++:
-      data = device_.read (max_size + 1)
+      data = device_.read (max-size + 1)
       if data[0] != 0x00: break
       // TODO(florian): why does the IRQ go high, if we don't have data yet?
       print "*** NEED LOOP *** $irq_.get"
       sleep --ms=10
-    if data.size != (max_size + 1): print "not expected size $data.size != $max_size + 1"
+    if data.size != (max-size + 1): print "not expected size $data.size != $max-size + 1"
     if data[0] == 0x00: throw "Unexpected status byte"
     return data[1..]
 
@@ -128,37 +121,30 @@ class I2cCommunication_ extends Communication_:
 
 class UartCommunication_ extends Communication_:
   port_/uart.Port?
-  reader_/reader.BufferedReader
-  writer_/writer.Writer
 
   constructor .port_:
-    reader_ = reader.BufferedReader port_
-    writer_ = writer.Writer port_
 
   wakeup:
     // Libnfc claims that this is the wakeup preamble.
     // TODO(florian): find this information in the spec and document it.
     // Found the section: Section 7.2.11.
-    writer_.write #[0x55, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+    port_.out.write #[0x55, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
 
-  counter := 0
-  write_frame frame/ByteArray -> none:
-    writer_.write frame
+  write-frame frame/ByteArray -> none:
+    port_.out.write frame
 
-  read_frame_ max_size/int -> ByteArray:
+  read-frame_ max-size/int -> ByteArray:
     // TODO(florian): synchronize on the preamble and start-code.
     // Probably not really necessary, as we don't expect communication errors.
 
     // Peek into the stream to get the size of the frame.
-    frame_data_size := reader_.byte 3
-    if  frame_data_size == 0:
+    frame-data-size := port_.in.peek-byte 3
+    if frame-data-size == 0:
       // Ack frame.
-      ack := reader_.read_bytes 6
-      return ack
+      return port_.in.read-bytes 6
 
-    frame_size := Communication_.HEADER_SIZE_ + frame_data_size + Communication_.FOOTER_SIZE_
-    frame := reader_.read_bytes frame_size
-    return frame
+    frame-size := Communication_.HEADER-SIZE_ + frame-data-size + Communication_.FOOTER-SIZE_
+    return port_.in.read-bytes frame-size
 
 /*
 class SpiCommunication_ extends Communication_:
@@ -171,59 +157,113 @@ class SpiCommunication_ extends Communication_:
     // Set NSS low during 1 ms (can be less depending on the quartz)
 */
 
+/**
+A target found by $Initiator.list-passive-targets.
+*/
+class Pn53xTarget implements Target:
+  pn53x_/Pn53x
+  target-number_/int
+  uid/ByteArray
+  /** The target's SENS_RES (ATQA for ISO 14443 Type A). */
+  atqa/ByteArray
+  /** The target's SEL_RES (SAK for ISO 14443 Type A). */
+  sak/int
+
+  constructor .pn53x_ .target-number_ .uid .atqa .sak:
+
+  /** See $Target.type. */
+  type -> int:
+    return CardType.from-sak sak uid
+
+  /**
+  See $Target.transceive.
+
+  The PN532 firmware always handles the CRC itself for this exchange, so
+    $check-crc has no effect here; it exists to satisfy $Target.
+  */
+  transceive bytes/ByteArray --check-crc/bool=false -> ByteArray?:
+    return pn53x_.initiator.data-exchange bytes --target-number=target-number_
+
+  /** See $Target.close. */
+  close -> none:
+    pn53x_.initiator.deselect --target-number=target-number_
+
+  stringify -> string:
+    uid-str := ""
+    uid.do: uid-str += "$(%02x it)"
+    return "UID: $uid-str - $(CardType.to-string type)"
+
 class Initiator:
-  static COMMAND_DATA_EXCHANGE_ ::= 0x40
-  static COMMAND_DESELECT_ ::= 0x44
-  static COMMAND_LIST_PASSIVE_TARGET_ ::= 0x4A
+  static COMMAND-DATA-EXCHANGE_ ::= 0x40
+  static COMMAND-DESELECT_ ::= 0x44
+  static COMMAND-LIST-PASSIVE-TARGET_ ::= 0x4A
 
   pn53x_/Pn53x
 
   constructor .pn53x_:
 
-  list_passive_targets:
-    max_targets := 1
-    baud_rate_modulation_type := 0x00  // Mifare.
-    min_response_size := 1  // NbTg, equal to 0.
-    max_target_data_size := 1 // Target-number
-        + 1   // SEL_RES  (TODO(florian): what is this?). Seems to be 0x08. Probably SAK.
-        + 1   // NFCIDLength
-        + 10  // NFCID  (TODO(florian): is 10 the most we can have?)
-        + 1   // ATS. Seems to be only present when the target requires a RATS.
-    max_response_size := 1  // nbTg, number of initialized targets.
-        + 2 * max_target_data_size
+  /**
+  Polls for passive ISO 14443 Type A targets (including MIFARE) in the
+    field.
+
+  Returns up to $max-targets $Pn53xTarget, or an empty list if none
+    responded.
+  */
+  list-passive-targets --max-targets/int=1 -> List:
+    if not 1 <= max-targets <= 2: throw "INVALID_ARGUMENT"
+    baud-rate-modulation-type := 0x00  // 106 kbps, ISO 14443 Type A / Mifare.
+
+    max-target-data-size := 1  // Target number.
+        + 2   // SENS_RES (ATQA).
+        + 1   // SEL_RES (SAK).
+        + 1   // NFCIDLength.
+        + 10  // NFCID (UID). 10 bytes covers the longest (triple-size) UID.
+    max-response-size := 1  // NbTg, number of initialized targets.
+        + max-targets * max-target-data-size
 
     // Next bytes could be used to specify the UID of the target to look for.
-    response := pn53x_.send_command_ COMMAND_LIST_PASSIVE_TARGET_
-        #[max_targets, baud_rate_modulation_type]
-        --max_response_size=max_response_size
+    response := pn53x_.send-command_ COMMAND-LIST-PASSIVE-TARGET_
+        #[max-targets, baud-rate-modulation-type]
+        --max-response-size=max-response-size
 
-    return response
+    nb-targets := response[0]
+    index := 1
+    return List nb-targets:
+      target-number := response[index++]
+      atqa := response[index .. index + 2]
+      index += 2
+      sak := response[index++]
+      uid-length := response[index++]
+      uid := response[index .. index + uid-length]
+      index += uid-length
+      // A trailing ATS (for ISO-DEP-capable targets) may follow here; not
+      // parsed yet, as ISO-DEP support hasn't landed.
+      Pn53xTarget pn53x_ target-number uid atqa sak
 
   // target_number == 0: deselect all targets.
-  deselect --target_number/int -> bool:
-    if not 0 <= target_number <= 2: throw "INVALID_ARGUMENT"
-    response := pn53x_.send_command_ COMMAND_DESELECT_ #[target_number] --response_size=1
-    print "deselect response code: $response[0]"
+  deselect --target-number/int -> bool:
+    if not 0 <= target-number <= 2: throw "INVALID_ARGUMENT"
+    response := pn53x_.send-command_ COMMAND-DESELECT_ #[target-number] --response-size=1
     return response[0] == 0x00
 
-  data_exchange data/ByteArray --target_number/int --max_response_size=-1 -> ByteArray:
-    if not 0 <= target_number <= 2: throw "INVALID_ARGUMENT"
-    command_data := #[target_number ] + data
-    response := pn53x_.send_command_ COMMAND_DATA_EXCHANGE_ command_data --max_response_size=(1 + max_response_size)
+  data-exchange data/ByteArray --target-number/int --max-response-size=-1 -> ByteArray:
+    if not 0 <= target-number <= 2: throw "INVALID_ARGUMENT"
+    command-data := #[target-number] + data
+    response := pn53x_.send-command_ COMMAND-DATA-EXCHANGE_ command-data --max-response-size=(1 + max-response-size)
     status := response[0]
     if status != 0x00: throw (Pn53xException status)
     return response[1..]
 
 class Miscellaneous:
-  static COMMAND_DIAGNOSE_ ::= 0x00
-  static COMMAND_GET_FIRMWARE_VERSION_ ::= 0x02
-  static COMMAND_GET_GENERAL_STATUS_ ::= 0x04
-  static COMMAND_SAM_CONFIGURATION_ ::= 0x14
+  static COMMAND-DIAGNOSE_ ::= 0x00
+  static COMMAND-GET-FIRMWARE-VERSION_ ::= 0x02
+  static COMMAND-GET-GENERAL-STATUS_ ::= 0x04
+  static COMMAND-SAM-CONFIGURATION_ ::= 0x14
 
-  static SAM_MODE_NORMAL_ ::= 0x01
-  static SAM_MODE_VIRTUAL_CARD_ ::= 0x02
-  static SAM_MODE_WIRED_CARD_ ::= 0x03
-  static SAM_MODE_DUAL_CARD_ ::= 0x04
+  static SAM-MODE-NORMAL_ ::= 0x01
+  static SAM-MODE-VIRTUAL-CARD_ ::= 0x02
+  static SAM-MODE-WIRED-CARD_ ::= 0x03
+  static SAM-MODE-DUAL-CARD_ ::= 0x04
 
   pn53x_/Pn53x
 
@@ -237,12 +277,12 @@ class Miscellaneous:
   The timeout is only required for the Virtual Card mode.
   */
   // TODO(florian): the timeout is in 50ms units. It may be null.
-  // Should we take `--timeout_ms` instead?
-  set_sam_configuration_ mode/int --timeout/int?=null -> none:
-    if timeout or mode == SAM_MODE_VIRTUAL_CARD_: throw "UNIMPLEMENTED"
+  // Should we take `--timeout-ms` instead?
+  set-sam-configuration_ mode/int --timeout/int?=null -> none:
+    if timeout or mode == SAM-MODE-VIRTUAL-CARD_: throw "UNIMPLEMENTED"
     // In theory we could also take over the P70_IRQ pin, but we don't need that yet.
     data := #[mode]
-    pn53x_.send_command_ COMMAND_SAM_CONFIGURATION_ data --response_size=0
+    pn53x_.send-command_ COMMAND-SAM-CONFIGURATION_ data --response-size=0
 
   /*
   // TODO(florian): can't find good parameters for this.
@@ -251,16 +291,13 @@ class Miscellaneous:
   Runs a self-diagnostic test, checking the continuity of the transmission paths of the antenna.
 
   Returns whether the antenna was detected.
-
-  # Advanced:
-  This test
   */
-  self_test --antenna/bool threshold/int -> bool:
+  self-test --antenna/bool threshold/int -> bool:
     if not 0 <= threshold <= 0xFF: throw "INVALID_ARGUMENT"
 
     if not antenna: throw "INVALID_ARGUMENT"
-    ANTENNA_TEST ::= 0x07
-    response := send_command_ COMMAND_DIAGNOSE #[ANTENNA_TEST] --response_size=1
+    ANTENNA-TEST ::= 0x07
+    response := send-command_ COMMAND-DIAGNOSE #[ANTENNA-TEST] --response-size=1
     return response[0] == 0x00
   */
 
@@ -270,26 +307,26 @@ class Miscellaneous:
 
   The data must have at most 262 bytes.
   */
-  self_test --communication_line/bool data/ByteArray -> bool:
-    if not communication_line: throw "INVALID_ARGUMENT"
+  self-test --communication-line/bool data/ByteArray -> bool:
+    if not communication-line: throw "INVALID_ARGUMENT"
     if data.size > 262: throw "INVALID_ARGUMENT"
 
     if data.size >= 254: throw "UNIMPLEMENTED"
 
-    COMMUNICATION_LINE_TEST ::= 0x00
-    diagnostic_data := #[COMMUNICATION_LINE_TEST] + data
-    response := pn53x_.send_command_ COMMAND_DIAGNOSE_ diagnostic_data --response_size=(data.size + 1)
-    return diagnostic_data == response
+    COMMUNICATION-LINE-TEST ::= 0x00
+    diagnostic-data := #[COMMUNICATION-LINE-TEST] + data
+    response := pn53x_.send-command_ COMMAND-DIAGNOSE_ diagnostic-data --response-size=(data.size + 1)
+    return diagnostic-data == response
 
   /**
   Runs a self-diagnosis, checking that the ROM is correct.
 
   Returns whether the test was successful.
   */
-  self_test --rom/bool -> bool:
+  self-test --rom/bool -> bool:
     if not rom: throw "INVALID_ARGUMENT"
-    ROM_TEST ::= 0x01
-    response := pn53x_.send_command_ COMMAND_DIAGNOSE_ #[ROM_TEST] --response_size=1
+    ROM-TEST ::= 0x01
+    response := pn53x_.send-command_ COMMAND-DIAGNOSE_ #[ROM-TEST] --response-size=1
     return response[0] == 0x00
 
   /**
@@ -297,53 +334,53 @@ class Miscellaneous:
 
   Returns whether the test was successful.
   */
-  self_test --ram/bool -> bool:
+  self-test --ram/bool -> bool:
     if not ram: throw "INVALID_ARGUMENT"
-    RAM_TEST ::= 0x02
-    response := pn53x_.send_command_ COMMAND_DIAGNOSE_ #[RAM_TEST] --response_size=1
+    RAM-TEST ::= 0x02
+    response := pn53x_.send-command_ COMMAND-DIAGNOSE_ #[RAM-TEST] --response-size=1
     return response[0] == 0x00
 
-  firmware_version -> FirmwareVersion:
-    response := pn53x_.send_command_ COMMAND_GET_FIRMWARE_VERSION_ #[] --response_size=4
+  firmware-version -> FirmwareVersion:
+    response := pn53x_.send-command_ COMMAND-GET-FIRMWARE-VERSION_ #[] --response-size=4
     return FirmwareVersion response[0] response[1] response[2] response[3]
 
-  general_status -> GeneralStatus:
-    min_response_size := 1 // Error code.
+  general-status -> GeneralStatus:
+    min-response-size := 1 // Error code.
         + 1  // Field, indicates if an external RF field is present. (1 or 0).
         + 1  // NbTg, number of targets currently controlled by the PN532 acting as initiator.
         + 1  // SAM status
-    max_response_size := min_response_size + 2 * 4  // Up to two target infos.
-    response := pn53x_.send_command_ COMMAND_GET_GENERAL_STATUS_ #[] --max_response_size=max_response_size
+    max-response-size := min-response-size + 2 * 4  // Up to two target infos.
+    response := pn53x_.send-command_ COMMAND-GET-GENERAL-STATUS_ #[] --max-response-size=max-response-size
     if response.size < 4: throw "INVALID_RESPONSE"
     index := 0
-    error_code := response[index++]
-    field_present := response[index++] != 0
-    nb_targets := response[index++]
-    if not 0 <= nb_targets <= 2: throw "Unexpected number of controlled targets $nb_targets"
-    if response.size < min_response_size + nb_targets * 4: throw "INVALID_RESPONSE"
-    target_infos := List nb_targets:
-      logical_number := response[index++]
-      encoded_bit_rate_reception := response[index++]
-      bit_rate_reception/int := ?
-      if encoded_bit_rate_reception == 0x00: bit_rate_reception = 106_000
-      else if encoded_bit_rate_reception == 0x01: bit_rate_reception = 212_000
-      else if encoded_bit_rate_reception == 0x02: bit_rate_reception = 424_000
+    error-code := response[index++]
+    field-present := response[index++] != 0
+    nb-targets := response[index++]
+    if not 0 <= nb-targets <= 2: throw "Unexpected number of controlled targets $nb-targets"
+    if response.size < min-response-size + nb-targets * 4: throw "INVALID_RESPONSE"
+    target-infos := List nb-targets:
+      logical-number := response[index++]
+      encoded-bit-rate-reception := response[index++]
+      bit-rate-reception/int := ?
+      if encoded-bit-rate-reception == 0x00: bit-rate-reception = 106_000
+      else if encoded-bit-rate-reception == 0x01: bit-rate-reception = 212_000
+      else if encoded-bit-rate-reception == 0x02: bit-rate-reception = 424_000
       else: throw "Unexpected bit-rate value."
-      encoded_bit_rate_transmission := response[index++]
-      bit_rate_transmission/int := ?
-      if encoded_bit_rate_transmission == 0x00: bit_rate_transmission = 106_000
-      else if encoded_bit_rate_transmission == 0x01: bit_rate_transmission = 212_000
-      else if encoded_bit_rate_transmission == 0x02: bit_rate_transmission = 424_000
+      encoded-bit-rate-transmission := response[index++]
+      bit-rate-transmission/int := ?
+      if encoded-bit-rate-transmission == 0x00: bit-rate-transmission = 106_000
+      else if encoded-bit-rate-transmission == 0x01: bit-rate-transmission = 212_000
+      else if encoded-bit-rate-transmission == 0x02: bit-rate-transmission = 424_000
       else: throw "Unexpected bit-rate value."
-      modulation_type := response[index++]
-      TargetInfo logical_number bit_rate_reception bit_rate_transmission modulation_type
+      modulation-type := response[index++]
+      TargetInfo logical-number bit-rate-reception bit-rate-transmission modulation-type
 
-    sam_status := SamStatus response[index++]
+    sam-status := SamStatus response[index++]
 
-    return GeneralStatus error_code field_present target_infos sam_status
+    return GeneralStatus error-code field-present target-infos sam-status
 
 class Power:
-  static COMMAND_POWER_DOWN_ ::= 0x16
+  static COMMAND-POWER-DOWN_ ::= 0x16
 
   pn53x_/Pn53x
 
@@ -357,64 +394,64 @@ class Power:
     // 2ms when using an appropriate quartz and layout.
     pn53x_.communication_.wakeup
 
-    if pn53x_.power_mode_ == Pn53x.POWER_MODE_LOW_VBAT_:
+    if pn53x_.power-mode_ == Pn53x.POWER-MODE-LOW-VBAT_:
       // Switch to normal mode.
       // This is done by sending a SAMConfiguration command.
       // See user manual 141520, Rev. 02. Section 3.1.3.3, page 13.
-      pn53x_.miscellaneous.set_sam_configuration_ Miscellaneous.SAM_MODE_NORMAL_
-    pn53x_.power_mode_ = Pn53x.POWER_MODE_NORMAL_
+      pn53x_.miscellaneous.set-sam-configuration_ Miscellaneous.SAM-MODE-NORMAL_
+    pn53x_.power-mode_ = Pn53x.POWER-MODE-NORMAL_
 
-  power_down:
-    WAKEUP_I2C ::= 0x80
-    WAKEUP_GPIO ::= 0x40
-    WAKEUP_SPI ::= 0x20
-    WAKEUP_UART ::= 0x10
-    WAKEUP_RF ::= 0x08
-    WAKEUP_INT1 ::= 0x02
-    WAKEUP_INT0 ::= 0x01
+  power-down:
+    WAKEUP-I2C ::= 0x80
+    WAKEUP-GPIO ::= 0x40
+    WAKEUP-SPI ::= 0x20
+    WAKEUP-UART ::= 0x10
+    WAKEUP-RF ::= 0x08
+    WAKEUP-INT1 ::= 0x02
+    WAKEUP-INT0 ::= 0x01
 
-    wakeup_enable_bits := WAKEUP_I2C | WAKEUP_SPI | WAKEUP_UART
+    wakeup-enable-bits := WAKEUP-I2C | WAKEUP-SPI | WAKEUP-UART
 
     // The power down command can only have an additional "generate-irq" byte which
-    // can be used if $WAKEUP_RF is enabled.
+    // can be used if $WAKEUP-RF is enabled.
 
-    data := #[wakeup_enable_bits]
-    response := pn53x_.send_command_ COMMAND_POWER_DOWN_ data --response_size=1
+    data := #[wakeup-enable-bits]
+    response := pn53x_.send-command_ COMMAND-POWER-DOWN_ data --response-size=1
     if response[0] != 0x00:
       throw (Pn53xException response[0])
 
-    pn53x_.power_mode_ = Pn53x.POWER_MODE_POWER_DOWN_
+    pn53x_.power-mode_ = Pn53x.POWER-MODE-POWER-DOWN_
     // The chip needs ~1ms to go into power down mode during which no command should be sent.
     sleep --ms=1
 
-class Pn53x:
+class Pn53x implements Reader:
   /**
   The I2C address of the PN53x.
   Note that the user manual lists the address as 0x48, which corresponds to the shifted address.
   */
-  static I2C_ADDRESS ::= 0x24
-  static I2C_MAX_SPEED ::= 400_000
+  static I2C-ADDRESS ::= 0x24
+  static I2C-MAX-SPEED ::= 400_000
 
-  static POWER_MODE_NORMAL_ ::= 0
+  static POWER-MODE-NORMAL_ ::= 0
   // Only on PN532:
   /**
   The chip is powered down and needs to be woken up using $Communication_.wakeup.
   */
-  static POWER_MODE_POWER_DOWN_ ::= 1
+  static POWER-MODE-POWER-DOWN_ ::= 1
   /**
   The chip is powered down and needs to be woken up using $Communication_.wakeup.
   To avoid it going back to sleep, the SAMConfiguration command needs to be sent as well.
   */
-  static POWER_MODE_LOW_VBAT_ ::= 2
+  static POWER-MODE-LOW-VBAT_ ::= 2
 
-  static CHIP_PN532_ ::= 0x00
-  static CHIP_PN533_ ::= 0x01
+  static CHIP-PN532_ ::= 0x00
+  static CHIP-PN533_ ::= 0x01
 
   // TODO(florian): test with PN533 as well.
-  chip_type_/int ::= CHIP_PN532_
+  chip-type_/int ::= CHIP-PN532_
 
   communication_/Communication_
-  reset_pin_/gpio.Pin?
+  reset-pin_/gpio.Pin?
 
   /**
   The current power mode of the device.
@@ -422,11 +459,11 @@ class Pn53x:
   If null, then the device was not turned on yet (see $on).
 
   We assume that the device is reset when an instance of this class is created.
-    As such, the initial power mode is $POWER_MODE_LOW_VBAT_.
+    As such, the initial power mode is $POWER-MODE-LOW-VBAT_.
 
   User manual 141520, Rev. 02. Section 3.1.3.3, page 13.
   */
-  power_mode_/int? := null
+  power-mode_/int? := null
 
   miscellaneous_/Miscellaneous? := null
   initiator_/Initiator? := null
@@ -434,34 +471,52 @@ class Pn53x:
 
   constructor.uart port/uart.Port --reset/gpio.Pin?=null:
     communication_ = UartCommunication_ port
-    reset_pin_ = reset
+    reset-pin_ = reset
 
   constructor.i2c device/i2c.Device --irq/gpio.Pin --reset/gpio.Pin?=null:
     communication_ = I2cCommunication_ device irq
-    reset_pin_ = reset
+    reset-pin_ = reset
 
-  on:
+  on -> none:
     reset_
     power.wakeup
+
+  /** See $Reader.off. */
+  off -> none:
+    power.power-down
+
+  /** See $Reader.capabilities. */
+  capabilities -> ReaderCapabilities:
+    return ReaderCapabilities
+        --no-supports-raw-frames
+        --firmware-does-anticollision
+
+  /**
+  Polls once for a target in the field.
+
+  The chip's firmware always does a fresh selection, so $new has no effect
+    here; it exists to satisfy $Reader.poll.
+  */
+  poll --new/bool=false -> Target?:
+    targets := initiator.list-passive-targets
+    if targets.is-empty: return null
+    return targets[0]
 
   /**
   Resets the device if a reset pin was given.
   */
   reset_:
-    if reset_pin_:
-      reset_pin_.set 0
+    if reset-pin_:
+      reset-pin_.set 0
       sleep --ms=10
-      reset_pin_.set 1
+      reset-pin_.set 1
 
-    power_mode_ = (chip_type_ == CHIP_PN532_) ? POWER_MODE_LOW_VBAT_ : POWER_MODE_NORMAL_
+    power-mode_ = (chip-type_ == CHIP-PN532_) ? POWER-MODE-LOW-VBAT_ : POWER-MODE-NORMAL_
 
     // TODO(florian): we are waiting 10ms here, to be sure that the device is ready.
     // We don't need to do this, if the board was powered on earlier and no reset pin
     // was given.
     sleep --ms=10
-
-  off:
-    // TODO(florian): send powerdown command.
 
   miscellaneous -> Miscellaneous:
     if not miscellaneous_: miscellaneous_ = Miscellaneous this
@@ -475,37 +530,35 @@ class Pn53x:
     if not power_: power_ = Power this
     return power_
 
-  send_command_ command/int data/ByteArray --max_response_size/int -> ByteArray:
-    frame_data := ByteArray data.size + 2
-    frame_data[0] = 0xD4  // Frame identifier (TFI). 0xD4 for system controller to PN532; 0xD5 for responses.
-    frame_data[1] = command
-    frame_data.replace 2 data
-    if power_mode_ != POWER_MODE_NORMAL_:
+  send-command_ command/int data/ByteArray --max-response-size/int -> ByteArray:
+    frame-data := ByteArray data.size + 2
+    frame-data[0] = 0xD4  // Frame identifier (TFI). 0xD4 for system controller to PN532; 0xD5 for responses.
+    frame-data[1] = command
+    frame-data.replace 2 data
+    if power-mode_ != POWER-MODE-NORMAL_:
       communication_.wakeup
-    communication_.write frame_data
-    read_ack_
-    return read_response_ command --max_size=max_response_size
+    communication_.write frame-data
+    read-ack_
+    return read-response_ command --max-size=max-response-size
 
-  send_command_ command/int data/ByteArray --response_size/int -> ByteArray:
-    response := send_command_ command data --max_response_size=response_size
-    if response.size != response_size: throw "INVALID_RESPONSE"
+  send-command_ command/int data/ByteArray --response-size/int -> ByteArray:
+    response := send-command_ command data --max-response-size=response-size
+    if response.size != response-size: throw "INVALID_RESPONSE"
     return response
 
-  read_ack_:
-    // print (communication_.read_frame_ 6)
-    // return
+  read-ack_:
     // An ack-frame doesn't have any data, but we could also receive an
     // error frame which sends us 1 byte.
-    ack := communication_.read --max_data_size=0
-    if not ack.is_empty:
+    ack := communication_.read --max-data-size=0
+    if not ack.is-empty:
       // We got an error frame.
       // TODO(florian: extract error code).
       throw "Error frame: $ack"
 
-  read_response_ command/int --max_size/int -> ByteArray:
+  read-response_ command/int --max-size/int -> ByteArray:
     // Responses are prefixed by `0xD5` and the command+1 that was sent.
-    response_size := max_size + 2
-    data := communication_.read --max_data_size=response_size
+    response-size := max-size + 2
+    data := communication_.read --max-data-size=response-size
     if data[0] != 0xD5: throw "Unexpected response to $command: $data"
     if data[1] != command + 1: throw "Unexpected response to $command: $data"
     return data[2..]
@@ -518,93 +571,93 @@ class FirmwareVersion:
 
   constructor .ic .version .revision .support:
 
-  supports_iso14443_type_a -> bool:
+  supports-iso14443-type-a -> bool:
     return support & 0x01 != 0
 
-  supports_iso14443_type_b -> bool:
+  supports-iso14443-type-b -> bool:
     return support & 0x02 != 0
 
-  supports_is18092 -> bool:
+  supports-iso18092 -> bool:
     return support & 0x04 != 0
 
   stringify -> string:
-    ic_name/string := ?
+    ic-name/string := ?
     if ic == 0x32:
-      ic_name = "PN532"
+      ic-name = "PN532"
     else:
       // TODO(florian): Check if PN533 has ic equal to 0x33
-      ic_name = "Unknown IC: $ic"
+      ic-name = "Unknown IC: $ic"
 
-    supports_str := ""
-    if supports_iso14443_type_a: supports_str += " ISO14443A"
-    if supports_iso14443_type_b: supports_str += " ISO14443B"
-    if supports_is18092: supports_str += " ISO18092"
-    return "IC: $ic_name, Version: $version, Revision: $revision, Supports:$supports_str"
+    supports-str := ""
+    if supports-iso14443-type-a: supports-str += " ISO14443A"
+    if supports-iso14443-type-b: supports-str += " ISO14443B"
+    if supports-iso18092: supports-str += " ISO18092"
+    return "IC: $ic-name, Version: $version, Revision: $revision, Supports:$supports-str"
 
 class GeneralStatus:
-  error_code/int
-  field_present/bool
-  target_infos/List
-  sam_status/SamStatus
+  error-code/int
+  field-present/bool
+  target-infos/List
+  sam-status/SamStatus
 
-  constructor .error_code .field_present .target_infos .sam_status:
+  constructor .error-code .field-present .target-infos .sam-status:
 
   stringify -> string:
-    error_string := Pn53xException.error_code_to_string error_code
-    return "Error code: $error_string, Field present: $field_present, Target infos: $target_infos, SAM status: $sam_status"
+    error-string := Pn53xException.error-code-to-string error-code
+    return "Error code: $error-string, Field present: $field-present, Target infos: $target-infos, SAM status: $sam-status"
 
 class SamStatus:
-  status_bits/int
+  status-bits/int
 
-  constructor .status_bits:
+  constructor .status-bits:
 
   /**
   Whether a full negative pulse has been detected on the CLAD line.
   */
-  negative_pulse_detected -> bool: return status_bits & 0x01 != 0
+  negative-pulse-detected -> bool: return status-bits & 0x01 != 0
 
   /**
   Whether an external RF field has been detected and switched off during or after a transaction.
   */
-  external_rf_detected_and_off -> bool: return status_bits & 0x02 != 0
+  external-rf-detected-and-off -> bool: return status-bits & 0x02 != 0
   /**
   Whether a timeout has been detected after SigActIRQ has fell down.
   */
-  timeout_after_sig_act_irg -> bool: return status_bits & 0x04 != 0
+  timeout-after-sig-act-irq -> bool: return status-bits & 0x04 != 0
 
   /**
   The CLAD line level. High if 1, low if 0.
   */
-  clad_line_level -> int: return status_bits >> 7
+  clad-line-level -> int: return status-bits >> 7
 
   stringify -> string:
-    return "Negative pulse detected: $negative_pulse_detected, External RF detected and off: $external_rf_detected_and_off, Timeout after SigActIRQ: $timeout_after_sig_act_irg, CLAD line level: $clad_line_level"
+    return "Negative pulse detected: $negative-pulse-detected, External RF detected and off: $external-rf-detected-and-off, Timeout after SigActIRQ: $timeout-after-sig-act-irq, CLAD line level: $clad-line-level"
 
 class TargetInfo:
-  logical_number/int
-  bit_rate_reception/int
-  bit_rate_transmission/int
-  modulation_type/int
+  logical-number/int
+  bit-rate-reception/int
+  bit-rate-transmission/int
+  modulation-type/int
 
-  constructor .logical_number .bit_rate_reception .bit_rate_transmission .modulation_type:
+  constructor .logical-number .bit-rate-reception .bit-rate-transmission .modulation-type:
 
-  modulation_type_as_string -> string:
-    // User manual, seciton 7.2.3, page 74
-    if modulation_type == 0x00:
+  modulation-type-as-string -> string:
+    // User manual, section 7.2.3, page 74
+    if modulation-type == 0x00:
       return "Mifare, Iso14443-3 Type A, Iso14443-3 Type B, Iso18092 passive 106 kpbs"
-    else if modulation_type == 0x10:
+    else if modulation-type == 0x10:
       return "FeliCa, Iso18092 passive 212/424 kpbs"
-    else if modulation_type == 0x01:
+    else if modulation-type == 0x01:
       return "Iso18092 Active mode"
-    else if modulation_type == 0x02:
+    else if modulation-type == 0x02:
       return "Innovision Jewel tag"
-    return "Uknown modulation type"
+    return "Unknown modulation type"
 
   stringify -> string:
-    return "Logical number: $logical_number, Bit rate reception: $bit_rate_reception, Bit rate transmission: $bit_rate_transmission, Modulation type: $modulation_type_as_string"
+    return "Logical number: $logical-number, Bit rate reception: $bit-rate-reception, Bit rate transmission: $bit-rate-transmission, Modulation type: $modulation-type-as-string"
 
 class Pn53xException:
-  static error_code_to_string code/int -> string:
+  static error-code-to-string code/int -> string:
     code &= 0x3F
     if code == 0x00: return "No error"
     if code == 0x01: return "Time Out"
@@ -612,7 +665,7 @@ class Pn53xException:
     if code == 0x03: return "Parity error"
     if code == 0x04: return "Collision error"
     if code == 0x05: return "Framing error during Mifare operation"
-    if code == 0x06: return "Abnormal bit-ocllision during bit-wise anticollision at 106 kbps"
+    if code == 0x06: return "Abnormal bit-collision during bit-wise anticollision at 106 kbps"
     if code == 0x07: return "Communication buffer size insufficient"
     if code == 0x09: return "RF buffer overflow" // Bit BufferOvfl of the register CIO_Error.
     if code == 0x0A: return "RF Field not switched on in time"
@@ -648,11 +701,11 @@ class Pn53xException:
     if code == 0x2E: return "NAD missing in DEP frame"
     throw "Unknown error code: $code"
 
-  error_code/int
+  error-code/int
 
-  constructor .error_code:
+  constructor .error-code:
 
   stringify -> string:
-    result := "Error $error_code - "
-    result += error_code_to_string error_code
+    result := "Error $error-code - "
+    result += error-code-to-string error-code
     return result

@@ -1,1 +1,9 @@
-# Toit Lock File.
+prefixes:
+  pn53x: toit-pn53x
+packages:
+  toit-nfc:
+    path: ../../toit-nfc
+  toit-pn53x:
+    path: ..
+    prefixes:
+      nfc: toit-nfc
