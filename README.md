@@ -15,3 +15,7 @@ and I2C; SPI is not yet implemented.
 The firmware does anticollision and ISO-DEP chaining itself, and has a
 hardware MIFARE Classic Crypto1 unit, unlike frame-level chips such as the
 MFRC522.
+
+---
+
+Parts of this repository were developed with the help of [Claude Code](https://claude.com/claude-code).
