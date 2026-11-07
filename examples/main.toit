@@ -7,25 +7,29 @@ import i2c
 import uart
 import pn53x show Pn53x
 
-SDA ::= 16
-SCL ::= 17
-IRQ ::= 34
+// Ian's I2C test harness (2026-11-07).
+SDA ::= 19
+SCL ::= 20
+IRQ ::= 7
+RESET ::= 6
 
 using-i2c [block]:
   sda := gpio.Pin SDA
   scl := gpio.Pin SCL
   irq := gpio.Pin IRQ
+  reset := gpio.Pin RESET
 
   bus := i2c.Bus --sda=sda --scl=scl --frequency=100_000
   device := bus.device Pn53x.I2C-ADDRESS
 
-  pn53x := Pn53x.i2c device --irq=irq
+  pn53x := Pn53x.i2c device --irq=irq --reset=reset
 
   block.call pn53x
 
   device.close
   bus.close
   irq.close
+  reset.close
   scl.close
   sda.close
 
@@ -49,7 +53,7 @@ using-uart [block]:
 main:
   print "starting"
 
-  using-uart: | pn53x/Pn53x |
+  using-i2c: | pn53x/Pn53x |
     pn53x.on
 
     print pn53x.miscellaneous.firmware-version
