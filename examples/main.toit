@@ -7,17 +7,22 @@ import i2c
 import uart
 import pn53x show Pn53x
 
-// Ian's I2C test harness (2026-11-07).
+// I2C test harness (2026-11-07). Only VCC/GND/SDA/SCL are wired
+// so far -- IRQ and RESET are both optional (see $Pn53x.i2c and
+// $I2cCommunication_.read-frame_: the chip's I2C "ready" status byte
+// doesn't need IRQ, it just means pure polling instead of an
+// IRQ-driven wait; RESET is commonly tied high on breakout boards
+// anyway). Set IRQ-PIN/RESET-PIN below once/if those get wired up.
 SDA ::= 19
 SCL ::= 20
-IRQ ::= 7
-RESET ::= 6
+IRQ-PIN/int? ::= null
+RESET-PIN/int? ::= null
 
 using-i2c [block]:
   sda := gpio.Pin SDA
   scl := gpio.Pin SCL
-  irq := gpio.Pin IRQ
-  reset := gpio.Pin RESET
+  irq := IRQ-PIN and (gpio.Pin IRQ-PIN)
+  reset := RESET-PIN and (gpio.Pin RESET-PIN)
 
   bus := i2c.Bus --sda=sda --scl=scl --frequency=100_000
   device := bus.device Pn53x.I2C-ADDRESS
@@ -28,8 +33,8 @@ using-i2c [block]:
 
   device.close
   bus.close
-  irq.close
-  reset.close
+  if irq: irq.close
+  if reset: reset.close
   scl.close
   sda.close
 

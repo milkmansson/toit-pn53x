@@ -88,30 +88,30 @@ abstract class Communication_:
 
 class I2cCommunication_ extends Communication_:
   device_/i2c.Device
-  irq_/gpio.Pin
+  irq_/gpio.Pin?
 
   constructor .device_ .irq_:
-    irq_.configure --input
+    if irq_: irq_.configure --input
 
   write-frame frame/ByteArray -> none:
     device_.write frame
 
   read-frame_ max-size/int -> ByteArray:
-    // When reading, the PN532 prefixes the data with a status byte.
-    // If it's 0x00, we have to ignore the byte and continue reading until the
-    // byte is 0x01.
-    // This means that the size of the data we need to read is not known beforehand.
-    // Due to the i2c protocol we can't just read single bytes one by one. Instead,
-    // we have to use the interrupt pin to know when we can start reading.
-    to-exception := catch: with-timeout --ms=15_000:
-      irq_.wait-for 0
-    if to-exception: print "*****************  to_exception: $to-exception $irq_.get"
+    // When reading, the PN532 prefixes the data with a status byte: 0x00
+    // means "not ready yet", 0x01 means the real data follows. This is
+    // the chip's own I2C protocol regardless of whether IRQ is wired --
+    // IRQ (when present) is just a host-side shortcut to avoid polling
+    // for it, not something the protocol depends on, so $irq_ is
+    // optional: without it, this goes straight to the polling loop
+    // below, which already has to handle "not ready yet" either way.
+    if irq_:
+      to-exception := catch: with-timeout --ms=15_000:
+        irq_.wait-for 0
+      if to-exception: print "*****************  to_exception: $to-exception $irq_.get"
     data /ByteArray? := null
     for i := 0; i < 100; i++:
       data = device_.read (max-size + 1)
       if data[0] != 0x00: break
-      // TODO(florian): why does the IRQ go high, if we don't have data yet?
-      print "*** NEED LOOP *** $irq_.get"
       sleep --ms=10
     if data.size != (max-size + 1): print "not expected size $data.size != $max-size + 1"
     if data[0] == 0x00: throw "Unexpected status byte"
@@ -522,7 +522,13 @@ class Pn53x implements Reader:
     communication_ = UartCommunication_ port
     reset-pin_ = reset
 
-  constructor.i2c device/i2c.Device --irq/gpio.Pin --reset/gpio.Pin?=null:
+  /**
+  $irq is optional: the PN532's I2C "ready" status byte (see
+    $I2cCommunication_.read-frame_) doesn't actually need it, so this
+    works over just SDA/SCL/VCC/GND, at the cost of pure polling
+    instead of an IRQ-driven wait for each response.
+  */
+  constructor.i2c device/i2c.Device --irq/gpio.Pin?=null --reset/gpio.Pin?=null:
     communication_ = I2cCommunication_ device irq
     reset-pin_ = reset
 
