@@ -19,12 +19,10 @@ IRQ-PIN/int? ::= null
 RESET-PIN/int? ::= null
 
 using-i2c [block]:
-  sda := gpio.Pin SDA
-  scl := gpio.Pin SCL
-  irq := IRQ-PIN and (gpio.Pin IRQ-PIN)
-  reset := RESET-PIN and (gpio.Pin RESET-PIN)
+  irq := IRQ-PIN and (gpio.Pin.in IRQ-PIN)
+  reset := RESET-PIN and (gpio.Pin.out RESET-PIN)
 
-  bus := i2c.Bus --sda=sda --scl=scl --frequency=100_000
+  bus := i2c.Bus --sda=SDA --scl=SCL --frequency=100_000
   device := bus.device Pn53x.I2C-ADDRESS
 
   pn53x := Pn53x.i2c device --irq=irq --reset=reset
@@ -35,25 +33,18 @@ using-i2c [block]:
   bus.close
   if irq: irq.close
   if reset: reset.close
-  scl.close
-  sda.close
 
 RX ::= 16
 TX ::= 17
 
 using-uart [block]:
-  rx := gpio.Pin RX
-  tx := gpio.Pin TX
-
-  port := uart.Port --rx=rx --tx=tx --baud-rate=115_200
+  port := uart.Port --rx=RX --tx=TX --baud-rate=115_200
 
   pn53x := Pn53x.uart port
 
   block.call pn53x
 
   port.close
-  tx.close
-  rx.close
 
 main:
   print "starting"

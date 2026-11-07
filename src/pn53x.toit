@@ -520,7 +520,7 @@ class Pn53x implements Reader:
 
   constructor.uart port/uart.Port --reset/gpio.Pin?=null:
     communication_ = UartCommunication_ port
-    reset-pin_ = reset
+    reset-pin_ = configure-reset-pin_ reset
 
   /**
   $irq is optional: the PN532's I2C "ready" status byte (see
@@ -530,7 +530,7 @@ class Pn53x implements Reader:
   */
   constructor.i2c device/i2c.Device --irq/gpio.Pin?=null --reset/gpio.Pin?=null:
     communication_ = I2cCommunication_ device irq
-    reset-pin_ = reset
+    reset-pin_ = configure-reset-pin_ reset
 
   /**
   $device should be created with --mode=0 (CPOL=0, CPHA=0), per
@@ -538,7 +538,16 @@ class Pn53x implements Reader:
   */
   constructor.spi device/spi.Device --reset/gpio.Pin?=null:
     communication_ = SpiCommunication_ device
-    reset-pin_ = reset
+    reset-pin_ = configure-reset-pin_ reset
+
+  /**
+  Configures $pin for output, regardless of how the caller constructed
+    it -- $reset_ calls $gpio.Pin.set directly, so the pin needs to
+    already be in output mode by the time it gets there.
+  */
+  static configure-reset-pin_ pin/gpio.Pin? -> gpio.Pin?:
+    if pin: pin.configure --output
+    return pin
 
   on -> none:
     reset_
