@@ -33,9 +33,12 @@ import i2c
 SDA ::= 19
 SCL ::= 20
 REPEAT-COUNT ::= 8
+// Lower than the 100kHz default -- a free, no-extra-hardware thing to
+// try alongside --pull-up while waiting for real pull-up resistors.
+FREQUENCY ::= 50_000
 
 main:
-  bus := i2c.Bus --sda=SDA --scl=SCL --frequency=100_000 --pull-up
+  bus := i2c.Bus --sda=SDA --scl=SCL --frequency=FREQUENCY --pull-up
 
   REPEAT-COUNT.repeat: | i/int |
     addresses := bus.scan --timeout-ms=200

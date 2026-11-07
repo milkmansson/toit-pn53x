@@ -18,11 +18,18 @@ SCL ::= 20
 IRQ-PIN/int? ::= null
 RESET-PIN/int? ::= null
 
+// Until real pull-up resistors (4.7k ohm, SDA/SCL to VCC) are on the
+// bus, both of these are free, no-extra-hardware things to try:
+// enabling the ESP32's own (weak) internal pull-ups, and a slower
+// clock, which tolerates weaker signal integrity than 100kHz does.
+// Neither is a substitute for real resistors, just a stopgap.
+FREQUENCY ::= 50_000
+
 using-i2c [block]:
   irq := IRQ-PIN and (gpio.Pin.in IRQ-PIN)
   reset := RESET-PIN and (gpio.Pin.out RESET-PIN)
 
-  bus := i2c.Bus --sda=SDA --scl=SCL --frequency=100_000
+  bus := i2c.Bus --sda=SDA --scl=SCL --frequency=FREQUENCY --pull-up
   device := bus.device Pn53x.I2C-ADDRESS
 
   pn53x := Pn53x.i2c device --irq=irq --reset=reset
